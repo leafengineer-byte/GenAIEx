@@ -1,0 +1,12 @@
+# Python virtual environments
+exp5/venv/
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Environment secrets
+.env
