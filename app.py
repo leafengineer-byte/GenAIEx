@@ -1,322 +1,508 @@
-"""Unified GenAI Experiments UI.
-
-A single Flask app that exposes every experiment in this repository through one
-interface. Each experiment keeps its own code; the modules in ``unified/backends``
-reuse them and load their models lazily, so nothing heavy is initialised until a
-feature is actually used.
-
-Run from the project root:
-
-    python app.py
-
-Then open http://127.0.0.1:8000
-"""
 import os
-import sys
+import io
+import base64
 
-from flask import Flask, jsonify, render_template, request, send_from_directory
+import numpy as np
+import tensorflow as tf
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from flask import Flask, render_template, request, jsonify
+from PIL import Image, ImageOps
 
-from unified.backends import assistant, gan, music, qa, sdxl, stylegan, vae, video  # noqa: E402
-from unified.backends import _runner  # noqa: E402
-from unified.backends._loader import PROJECT_ROOT  # noqa: E402
-from unified.backends._models import (  # noqa: E402
-    audiocraft_available,
-    hf_cached,
-    heavy_models_supported,
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+
+# ============================================================
+# FLASK APP
+# ============================================================
+
+app = Flask(__name__)
+
+app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
+
+
+# ============================================================
+# PATHS
+# ============================================================
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+ENCODER_PATH = os.path.join(
+    BASE_DIR,
+    "models",
+    "vae_encoder.keras"
 )
 
-app = Flask(
-    __name__,
-    template_folder="unified/templates",
-    static_folder="unified/static",
+DECODER_PATH = os.path.join(
+    BASE_DIR,
+    "models",
+    "vae_decoder.keras"
 )
-app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
 
 
-def _ok(**payload):
-    payload["success"] = True
-    return jsonify(payload)
+# ============================================================
+# LOAD TRAINED MODELS
+# ============================================================
+
+print("Loading VAE models...")
+
+def sampling(args):
+    z_mean, z_log_var = args
+    epsilon = tf.random.normal(
+        shape=tf.shape(z_mean)
+    )
+    return z_mean + tf.exp(0.5 * z_log_var) * epsilon
 
 
-def _fail(message, status=500):
-    return jsonify({"success": False, "error": str(message)}), status
+def load_keras_model(path):
+    dense_layer = tf.keras.layers.Dense
+    original_init = dense_layer.__init__
 
+    def compatible_init(self, *args, **kwargs):
+        if kwargs.get("quantization_config") is None:
+            kwargs.pop("quantization_config", None)
+        original_init(self, *args, **kwargs)
+
+    dense_layer.__init__ = compatible_init
+    try:
+        return tf.keras.models.load_model(
+            path,
+            compile=False,
+            custom_objects={"sampling": sampling}
+        )
+    finally:
+        dense_layer.__init__ = original_init
+
+
+encoder = load_keras_model(ENCODER_PATH)
+decoder = load_keras_model(DECODER_PATH)
+
+print("Encoder loaded successfully.")
+print("Decoder loaded successfully.")
+
+
+# ============================================================
+# IMAGE -> BASE64
+# ============================================================
+
+def image_to_base64(image):
+
+    buffer = io.BytesIO()
+
+    image.save(
+        buffer,
+        format="PNG"
+    )
+
+    return base64.b64encode(
+        buffer.getvalue()
+    ).decode("utf-8")
+
+
+# ============================================================
+# PREPROCESS MNIST IMAGE
+# ============================================================
+
+def preprocess_image(image):
+
+    # Convert to grayscale
+    image = image.convert("L")
+
+    # Resize
+    image = image.resize(
+        (28, 28),
+        Image.Resampling.LANCZOS
+    )
+
+    # Convert to numpy
+    img = np.array(
+        image
+    ).astype("float32") / 255.0
+
+    # Invert if background is white
+    if img.mean() > 0.5:
+        img = 1.0 - img
+
+    return img
+
+
+# ============================================================
+# CREATE LATENT SPACE VISUALIZATION
+# ============================================================
+
+def create_latent_visualization(
+    latent_point
+):
+
+    # Create a grid around the input point
+    grid_size = 15
+
+    x_values = np.linspace(
+        -3,
+        3,
+        grid_size
+    )
+
+    y_values = np.linspace(
+        -3,
+        3,
+        grid_size
+    )
+
+    X, Y = np.meshgrid(
+        x_values,
+        y_values
+    )
+
+    points = np.column_stack(
+        (
+            X.ravel(),
+            Y.ravel()
+        )
+    )
+
+    generated = decoder.predict(
+        points,
+        verbose=0
+    )
+
+    # Calculate image brightness
+    brightness = generated.mean(
+        axis=(1, 2, 3)
+    )
+
+    plt.figure(
+        figsize=(7, 7)
+    )
+
+    scatter = plt.scatter(
+        points[:, 0],
+        points[:, 1],
+        c=brightness,
+        cmap="viridis",
+        s=35,
+        alpha=0.65
+    )
+
+    # Highlight current input
+    plt.scatter(
+        latent_point[0],
+        latent_point[1],
+        s=300,
+        marker="*",
+        color="red",
+        edgecolors="white",
+        linewidths=2,
+        label="Input Latent Position"
+    )
+
+    plt.axhline(
+        0,
+        color="gray",
+        linewidth=0.7,
+        alpha=0.5
+    )
+
+    plt.axvline(
+        0,
+        color="gray",
+        linewidth=0.7,
+        alpha=0.5
+    )
+
+    plt.xlabel(
+        "Latent Dimension 1 (z₁)"
+    )
+
+    plt.ylabel(
+        "Latent Dimension 2 (z₂)"
+    )
+
+    plt.title(
+        "2D VAE Latent Space"
+    )
+
+    plt.legend()
+
+    plt.grid(
+        alpha=0.15
+    )
+
+    plt.tight_layout()
+
+    buffer = io.BytesIO()
+
+    plt.savefig(
+        buffer,
+        format="png",
+        dpi=140,
+        transparent=True
+    )
+
+    plt.close()
+
+    buffer.seek(0)
+
+    return base64.b64encode(
+        buffer.getvalue()
+    ).decode("utf-8")
+
+
+# ============================================================
+# HOME PAGE
+# ============================================================
 
 @app.route("/")
-def index():
-    return render_template("index.html")
+def home():
 
-
-@app.route("/api/status")
-def status():
-    """Report which experiments are ready to run and on which runtime."""
-    vae_ready = (
-        _runner.VAE_PYTHON.is_file()
-        and (PROJECT_ROOT / "exp5" / "models" / "vae_encoder.keras").is_file()
-        and (PROJECT_ROOT / "exp5" / "models" / "vae_decoder.keras").is_file()
-    )
-    gan_ready = (
-        _runner.GAN_PYTHON.is_file()
-        and (PROJECT_ROOT / "exp6" / "generator.pth").is_file()
-    )
-    default_ready = _runner.DEFAULT_PYTHON.is_file()
-    heavy_ready = heavy_models_supported()
-    heavy_note = (
-        "needs a GPU or 16 GB RAM · not runnable on this PC"
-        if not heavy_ready
-        else "needs a large model download on first run"
-    )
-
-    return _ok(
-        status={
-            "vae": {
-                "ready": vae_ready,
-                "runtime": "exp5/venv · TensorFlow + Keras",
-                "note": "trained VAE · works offline",
-            },
-            "gan": {
-                "ready": gan_ready,
-                "runtime": "exp6/.venv · PyTorch",
-                "note": "trained DCGAN · works offline",
-            },
-            "stylegan": {
-                "ready": default_ready,
-                "runtime": ".venv-unified · PyTorch",
-                "note": "random-init demo · no trained weights",
-            },
-            "qa": {
-                "ready": default_ready and hf_cached("google/flan-t5-base"),
-                "runtime": ".venv-unified · Transformers",
-                "note": "needs flan-t5-base download (~1 GB)",
-            },
-            "sdxl": {
-                "ready": default_ready
-                and heavy_ready
-                and hf_cached("stabilityai/stable-diffusion-xl-base-1.0"),
-                "runnable": heavy_ready,
-                "runtime": ".venv-unified · Diffusers",
-                "note": heavy_note,
-            },
-            "music": {
-                "ready": default_ready
-                and heavy_ready
-                and audiocraft_available()
-                and hf_cached("facebook/musicgen-small"),
-                "runnable": heavy_ready,
-                "runtime": ".venv-unified · AudioCraft",
-                "note": heavy_note,
-            },
-            "assistant": {
-                "ready": default_ready
-                and hf_cached("Qwen/Qwen2.5-0.5B-Instruct")
-                and hf_cached("sentence-transformers/all-MiniLM-L6-v2"),
-                "runtime": ".venv-unified · Transformers + FAISS",
-                "note": "works offline · cached model",
-            },
-            "video": {
-                "ready": default_ready
-                and heavy_ready
-                and hf_cached("damo-vilab/text-to-video-ms-1.7b"),
-                "runnable": heavy_ready,
-                "runtime": ".venv-unified · Diffusers",
-                "note": heavy_note,
-            },
-        }
+    return render_template(
+        "index.html"
     )
 
 
 # ============================================================
-# EXPERIMENT 1 - documentation (PDF)
+# GENERATE RANDOM IMAGES
 # ============================================================
 
-@app.route("/docs/exp1")
-def exp1_doc():
-    return send_from_directory(PROJECT_ROOT / "exp1", "vertopal.com_GenAIex1.pdf")
+@app.route(
+    "/generate",
+    methods=["POST"]
+)
+def generate():
 
-
-# ============================================================
-# EXPERIMENT 3 - FLAN-T5 question answering
-# ============================================================
-
-@app.route("/api/qa/ask", methods=["POST"])
-def qa_ask():
     try:
-        data = request.get_json(silent=True) or {}
-        answer = qa.answer(data.get("question", ""), data.get("max_tokens", 128))
-        return _ok(answer=answer)
-    except Exception as exc:  # noqa: BLE001
-        app.logger.exception("QA failed")
-        return _fail(exc)
 
-
-# ============================================================
-# EXPERIMENT 4 - SDXL text-to-image
-# ============================================================
-
-@app.route("/api/sdxl/generate", methods=["POST"])
-def sdxl_generate():
-    try:
-        data = request.get_json(silent=True) or {}
-        image = sdxl.generate(
-            data.get("prompt", ""),
-            data.get("negative_prompt", ""),
-            data.get("steps", 25),
-            data.get("guidance_scale", 7.0),
-            data.get("seed", -1),
+        count = int(
+            request.json.get(
+                "count",
+                9
+            )
         )
-        return _ok(image=image)
-    except Exception as exc:  # noqa: BLE001
-        app.logger.exception("SDXL generation failed")
-        return _fail(exc)
+
+        count = max(
+            1,
+            min(count, 25)
+        )
+
+        # Random latent vectors
+        latent_vectors = np.random.normal(
+            size=(count, 2)
+        )
+
+        # Generate images
+        generated = decoder.predict(
+            latent_vectors,
+            verbose=0
+        )
+
+        images = []
+
+        for i in range(count):
+
+            arr = (
+                generated[i].squeeze()
+                * 255
+            ).clip(
+                0,
+                255
+            ).astype(
+                np.uint8
+            )
+
+            image = Image.fromarray(
+                arr
+            )
+
+            images.append(
+                {
+                    "image":
+                        image_to_base64(
+                            image
+                        ),
+
+                    "z1":
+                        round(
+                            float(
+                                latent_vectors[i, 0]
+                            ),
+                            3
+                        ),
+
+                    "z2":
+                        round(
+                            float(
+                                latent_vectors[i, 1]
+                            ),
+                            3
+                        )
+                }
+            )
+
+        return jsonify(
+            {
+                "success": True,
+                "images": images
+            }
+        )
+
+    except Exception as e:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": str(e)
+            }
+        ), 500
 
 
 # ============================================================
-# EXPERIMENT 5 - VAE (MNIST)
+# RECONSTRUCT IMAGE
 # ============================================================
 
-@app.route("/api/vae/generate", methods=["POST"])
-def vae_generate():
-    try:
-        data = request.get_json(silent=True) or {}
-        return _ok(images=vae.generate(data.get("count", 9)))
-    except Exception as exc:  # noqa: BLE001
-        app.logger.exception("VAE generation failed")
-        return _fail(exc)
+@app.route(
+    "/reconstruct",
+    methods=["POST"]
+)
+def reconstruct():
 
-
-@app.route("/api/vae/reconstruct", methods=["POST"])
-def vae_reconstruct():
     try:
+
         if "image" not in request.files:
-            return _fail("No image uploaded.", status=400)
-        return _ok(**vae.reconstruct(request.files["image"].stream))
-    except Exception as exc:  # noqa: BLE001
-        app.logger.exception("VAE reconstruction failed")
-        return _fail(exc)
 
+            return jsonify(
+                {
+                    "success": False,
+                    "error":
+                        "No image uploaded."
+                }
+            ), 400
 
-@app.route("/api/vae/decode", methods=["POST"])
-def vae_decode():
-    try:
-        data = request.get_json(silent=True) or {}
-        return _ok(**vae.decode_point(data.get("z1", 0.0), data.get("z2", 0.0)))
-    except Exception as exc:  # noqa: BLE001
-        app.logger.exception("VAE decode failed")
-        return _fail(exc)
+        file = request.files["image"]
 
-
-# ============================================================
-# EXPERIMENT 6 - DCGAN faces
-# ============================================================
-
-@app.route("/api/gan/generate", methods=["POST"])
-def gan_generate():
-    try:
-        data = request.get_json(silent=True) or {}
-        return _ok(images=gan.generate(data.get("count", 4)))
-    except Exception as exc:  # noqa: BLE001
-        app.logger.exception("GAN generation failed")
-        return _fail(exc)
-
-
-# ============================================================
-# EXPERIMENT 7 - StyleGAN (random-init demo)
-# ============================================================
-
-@app.route("/api/stylegan/generate", methods=["POST"])
-def stylegan_generate():
-    try:
-        data = request.get_json(silent=True) or {}
-        return _ok(images=stylegan.generate(data.get("count", 8)))
-    except Exception as exc:  # noqa: BLE001
-        app.logger.exception("StyleGAN generation failed")
-        return _fail(exc)
-
-
-# ============================================================
-# EXPERIMENT 8 - MusicGen
-# ============================================================
-
-@app.route("/api/music/generate", methods=["POST"])
-def music_generate():
-    try:
-        data = request.get_json(silent=True) or {}
-        filename = music.generate(data.get("prompt", ""), data.get("duration", 8))
-        return _ok(audio=f"/media/audio/{filename}")
-    except Exception as exc:  # noqa: BLE001
-        app.logger.exception("Music generation failed")
-        return _fail(exc)
-
-
-@app.route("/media/audio/<path:filename>")
-def serve_audio(filename):
-    return send_from_directory(music.OUTPUT_DIR, filename)
-
-
-# ============================================================
-# EXPERIMENT 9 - RAG personal assistant
-# ============================================================
-
-@app.route("/api/assistant/ask", methods=["POST"])
-def assistant_ask():
-    try:
-        data = request.get_json(silent=True) or {}
-        result = assistant.ask(
-            data.get("question", ""),
-            data.get("document", ""),
-            data.get("use_rag", True),
-            data.get("max_tokens", 180),
+        image = Image.open(
+            file.stream
         )
-        return _ok(**result)
-    except Exception as exc:  # noqa: BLE001
-        app.logger.exception("Assistant failed")
-        return _fail(exc)
 
-
-@app.route("/api/assistant/upload", methods=["POST"])
-def assistant_upload():
-    try:
-        if "file" not in request.files:
-            return _fail("No file uploaded.", status=400)
-        upload = request.files["file"]
-        text = assistant.extract_text(upload.filename or "document.txt", upload.read())
-        return _ok(text=text, characters=len(text))
-    except Exception as exc:  # noqa: BLE001
-        app.logger.exception("Document extraction failed")
-        return _fail(exc)
-
-
-# ============================================================
-# EXPERIMENT 10 - text-to-video
-# ============================================================
-
-@app.route("/api/video/generate", methods=["POST"])
-def video_generate():
-    try:
-        data = request.get_json(silent=True) or {}
-        filename = video.generate(
-            data.get("prompt", ""),
-            data.get("frames", 16),
-            data.get("steps", 25),
+        # Preprocess
+        processed = preprocess_image(
+            image
         )
-        return _ok(video=f"/media/video/{filename}")
-    except Exception as exc:  # noqa: BLE001
-        app.logger.exception("Video generation failed")
-        return _fail(exc)
+
+        # Add batch dimension
+        input_image = processed.reshape(
+            1,
+            28,
+            28,
+            1
+        )
+
+        # Encoder
+        z_mean, z_log_var, z = encoder.predict(
+            input_image,
+            verbose=0
+        )
+
+        # Decoder
+        reconstructed = decoder.predict(
+            z,
+            verbose=0
+        )
+
+        reconstructed_array = (
+            reconstructed[0].squeeze()
+            * 255
+        ).clip(
+            0,
+            255
+        ).astype(
+            np.uint8
+        )
+
+        reconstructed_image = Image.fromarray(
+            reconstructed_array
+        )
+
+        # Latent visualization
+        latent_graph = create_latent_visualization(
+            z_mean[0]
+        )
+
+        return jsonify(
+            {
+                "success": True,
+
+                "input":
+                    image_to_base64(
+                        Image.fromarray(
+                            (
+                                processed * 255
+                            ).astype(
+                                np.uint8
+                            )
+                        )
+                    ),
+
+                "reconstruction":
+                    image_to_base64(
+                        reconstructed_image
+                    ),
+
+                "z1":
+                    round(
+                        float(
+                            z_mean[0, 0]
+                        ),
+                        4
+                    ),
+
+                "z2":
+                    round(
+                        float(
+                            z_mean[0, 1]
+                        ),
+                        4
+                    ),
+
+                "latent_graph":
+                    latent_graph
+            }
+        )
+
+    except Exception as e:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": str(e)
+            }
+        ), 500
 
 
-@app.route("/media/video/<path:filename>")
-def serve_video(filename):
-    return send_from_directory(video.OUTPUT_DIR, filename)
+# ============================================================
+# RUN FLASK
+# ============================================================
+
+
+@app.route('/decode_point', methods=['POST'])
+def decode_point():
+    try:
+        data = request.json or {}
+        z1 = float(data.get('z1', 0.0))
+        z2 = float(data.get('z2', 0.0))
+        pt = np.array([[z1, z2]], dtype=np.float32)
+        generated = decoder.predict(pt, verbose=0)
+        arr = (generated[0].squeeze() * 255).clip(0, 255).astype(np.uint8)
+        img = Image.fromarray(arr)
+        return jsonify({'success': True, 'image': image_to_base64(img), 'z1': z1, 'z2': z2})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 if __name__ == "__main__":
+
     app.run(
+        debug=True,
         host="127.0.0.1",
-        port=int(os.environ.get("PORT", 8000)),
-        debug=False,
-        threaded=True,
-        use_reloader=False,
+        port=int(os.environ.get('PORT', 5005))
     )
