@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>VAE MNIST Studio</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+
+</head>
+
+
+<body>
+
+
+<!-- ===================================================== -->
+<!-- BACKGROUND -->
+<!-- ===================================================== -->
+
+<div class="background-grid"></div>
+
+
+<!-- ===================================================== -->
+<!-- NAVBAR -->
+<!-- ===================================================== -->
+
+<nav class="navbar">
+
+    <div class="brand">
+
+        <div class="brand-icon">
+            V
+        </div>
+
+        <div>
+
+            <h2>VAE Studio</h2>
+
+            <span>MNIST GENERATIVE AI</span>
+
+        </div>
+
+    </div>
+
+
+    <div class="nav-status">
+
+        <span class="status-dot"></span>
+
+        MODEL ONLINE
+
+    </div>
+
+</nav>
+
+
+<!-- ===================================================== -->
+<!-- HERO -->
+<!-- ===================================================== -->
+
+<section class="hero">
+
+    <div class="hero-content">
+
+        <div class="badge">
+            ✦ VARIATIONAL AUTOENCODER
+        </div>
+
+        <h1>
+            Explore the
+            <span>Latent Space.</span>
+        </h1>
+
+        <p>
+            Visualize how a Variational Autoencoder
+            learns, reconstructs and generates
+            handwritten digits from a 2-dimensional
+            latent representation.
+        </p>
+
+
+        <div class="hero-stats">
+
+            <div>
+                <strong>2D</strong>
+                <small>LATENT SPACE</small>
+            </div>
+
+            <div>
+                <strong>60K</strong>
+                <small>TRAINING IMAGES</small>
+            </div>
+
+            <div>
+                <strong>28×28</strong>
+                <small>IMAGE SIZE</small>
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <div class="hero-visual">
+
+        <div class="orb orb-one"></div>
+        <div class="orb orb-two"></div>
+
+        <div class="floating-digit digit-one">
+            7
+        </div>
+
+        <div class="floating-digit digit-two">
+            3
+        </div>
+
+        <div class="floating-digit digit-three">
+            9
+        </div>
+
+        <div class="latent-card">
+
+            <div class="mini-grid"></div>
+
+            <div class="latent-point"></div>
+
+            <span class="latent-label">
+                z₁
+            </span>
+
+            <span class="latent-label label-two">
+                z₂
+            </span>
+
+        </div>
+
+    </div>
+
+</section>
+
+
+<!-- ===================================================== -->
+<!-- RECONSTRUCTION SECTION -->
+<!-- ===================================================== -->
+
+<section class="section">
+
+    <div class="section-heading">
+
+        <div>
+
+            <span class="section-number">
+                01
+            </span>
+
+            <h2>
+                Reconstruct an Image
+            </h2>
+
+        </div>
+
+        <p>
+            Upload a handwritten digit and see
+            how the VAE encodes and reconstructs it.
+        </p>
+
+    </div>
+
+
+    <div class="reconstruction-layout">
+
+
+        <!-- UPLOAD -->
+
+        <div class="panel upload-panel">
+
+            <div class="panel-header">
+
+                <span>INPUT</span>
+
+                <span class="panel-icon">
+                    ↑
+                </span>
+
+            </div>
+
+
+            <div
+                class="upload-box"
+                id="uploadBox"
+            >
+
+                <div class="upload-icon">
+                    +
+                </div>
+
+                <h3>
+                    Drop your digit here
+                </h3>
+
+                <p>
+                    PNG / JPG • MNIST style
+                </p>
+
+                <button
+                    class="secondary-btn"
+                    onclick="document.getElementById('fileInput').click()"
+                >
+                    Choose Image
+                </button>
+
+                <input
+                    type="file"
+                    id="fileInput"
+                    accept="image/*"
+                    hidden
+                >
+
+            </div>
+
+
+            <button
+                class="primary-btn full"
+                id="reconstructBtn"
+            >
+
+                <span>
+                    Encode & Reconstruct
+                </span>
+
+                <span>
+                    →
+                </span>
+
+            </button>
+
+        </div>
+
+
+        <!-- ORIGINAL -->
+
+        <div class="panel image-panel">
+
+            <div class="panel-header">
+
+                <span>ORIGINAL</span>
+
+                <span>
+                    28 × 28
+                </span>
+
+            </div>
+
+            <div class="image-container">
+
+                <img
+                    id="inputImage"
+                    alt="Input"
+                >
+
+                <div
+                    class="placeholder"
+                    id="inputPlaceholder"
+                >
+                    Your uploaded image
+                    will appear here
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- RECONSTRUCTED -->
+
+        <div class="panel image-panel">
+
+            <div class="panel-header">
+
+                <span>RECONSTRUCTED</span>
+
+                <span class="accent">
+                    VAE DECODER
+                </span>
+
+            </div>
+
+            <div class="image-container">
+
+                <img
+                    id="reconstructedImage"
+                    alt="Reconstructed"
+                >
+
+                <div
+                    class="placeholder"
+                    id="reconstructionPlaceholder"
+                >
+                    Reconstructed image
+                    will appear here
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <!-- LATENT VALUES -->
+
+    <div
+        class="latent-values"
+        id="latentValues"
+    >
+
+        <div class="value-card">
+
+            <span>
+                LATENT DIMENSION 1
+            </span>
+
+            <strong id="z1">
+                —
+            </strong>
+
+        </div>
+
+        <div class="value-card">
+
+            <span>
+                LATENT DIMENSION 2
+            </span>
+
+            <strong id="z2">
+                —
+            </strong>
+
+        </div>
+
+        <div class="value-card">
+
+            <span>
+                REPRESENTATION
+            </span>
+
+            <strong>
+                z = [z₁, z₂]
+            </strong>
+
+        </div>
+
+    </div>
+
+</section>
+
+
+<!-- ===================================================== -->
+<!-- LATENT SPACE -->
+<!-- ===================================================== -->
+
+<section class="section dark-section">
+
+    <div class="section-heading">
+
+        <div>
+
+            <span class="section-number">
+                02
+            </span>
+
+            <h2>
+                Latent Space
+            </h2>
+
+        </div>
+
+        <p>
+            A 2-dimensional representation learned
+            by the VAE encoder.
+        </p>
+
+    </div>
+
+
+    <div class="latent-visual-container">
+
+        <div
+            class="latent-placeholder"
+            id="latentPlaceholder"
+        >
+
+            <div class="big-symbol">
+                ∞
+            </div>
+
+            <p>
+                Upload an image to visualize
+                its position in latent space.
+            </p>
+
+        </div>
+
+
+        <img
+            id="latentGraph"
+            class="latent-graph"
+            alt="Latent Space"
+        >
+
+    </div>
+
+</section>
+
+
+<!-- ===================================================== -->
+<!-- GENERATION -->
+<!-- ===================================================== -->
+
+<section class="section">
+
+    <div class="section-heading">
+
+        <div>
+
+            <span class="section-number">
+                03
+            </span>
+
+            <h2>
+                Generate New Digits
+            </h2>
+
+        </div>
+
+        <p>
+            Sample random vectors from N(0, I)
+            and pass them directly through the decoder.
+        </p>
+
+    </div>
+
+
+    <div class="generation-toolbar">
+
+        <div>
+
+            <span>
+                GENERATED SAMPLES
+            </span>
+
+            <strong id="generationCount">
+                9
+            </strong>
+
+        </div>
+
+
+        <div class="count-buttons">
+
+            <button onclick="setCount(6)">
+                6
+            </button>
+
+            <button
+                class="active"
+                onclick="setCount(9)"
+            >
+                9
+            </button>
+
+            <button onclick="setCount(12)">
+                12
+            </button>
+
+            <button onclick="setCount(16)">
+                16
+            </button>
+
+        </div>
+
+
+        <button
+            class="primary-btn"
+            id="generateBtn"
+        >
+
+            ✦ Generate New Images
+
+        </button>
+
+    </div>
+
+
+    <div
+        class="generated-grid"
+        id="generatedGrid"
+    >
+
+        <div class="generation-empty">
+
+            <span>✦</span>
+
+            <p>
+                Click "Generate New Images"
+                to explore the decoder.
+            </p>
+
+        </div>
+
+    </div>
+
+</section>
+
+
+<!-- ===================================================== -->
+<!-- HOW IT WORKS -->
+<!-- ===================================================== -->
+
+<section class="section process-section">
+
+    <div class="section-heading">
+
+        <div>
+
+            <span class="section-number">
+                04
+            </span>
+
+            <h2>
+                How the VAE Works
+            </h2>
+
+        </div>
+
+    </div>
+
+
+    <div class="process-grid">
+
+        <div class="process-card">
+
+            <div class="process-icon">
+                01
+            </div>
+
+            <h3>
+                Encoder
+            </h3>
+
+            <p>
+                Converts a 28×28 image into
+                μ and log(σ²).
+            </p>
+
+        </div>
+
+
+        <div class="process-arrow">
+            →
+        </div>
+
+
+        <div class="process-card highlight">
+
+            <div class="process-icon">
+                02
+            </div>
+
+            <h3>
+                Latent Space
+            </h3>
+
+            <p>
+                Samples a 2D latent vector
+                using the reparameterization trick.
+            </p>
+
+        </div>
+
+
+        <div class="process-arrow">
+            →
+        </div>
+
+
+        <div class="process-card">
+
+            <div class="process-icon">
+                03
+            </div>
+
+            <h3>
+                Decoder
+            </h3>
+
+            <p>
+                Converts the latent vector
+                back into a 28×28 image.
+            </p>
+
+        </div>
+
+    </div>
+
+</section>
+
+
+<!-- ===================================================== -->
+<!-- FOOTER -->
+<!-- ===================================================== -->
+
+<footer>
+
+    <div>
+        VAE STUDIO
+    </div>
+
+    <p>
+        Generative AI • TensorFlow • Keras • MNIST
+    </p>
+
+</footer>
+
+
+<script
+    src="{{ url_for('static', filename='script.js') }}"
+></script>
+
+</body>
+
+</html>
