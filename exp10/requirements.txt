@@ -1,0 +1,10 @@
+diffusers
+transformers
+accelerate
+torch
+torchvision
+safetensors
+imageio
+imageio-ffmpeg
+Pillow
+matplotlib

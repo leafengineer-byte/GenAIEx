@@ -1,0 +1,1 @@
+Follow README.md setup and commands in Google Colab. Notebook generation unavailable: [Errno 2] No such file or directory: '/mnt/data/Experiment_7_StyleGAN/colab/Experiment_7_StyleGAN.ipynb'

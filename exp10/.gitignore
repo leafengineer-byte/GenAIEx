@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+.ipynb_checkpoints/
+outputs/*
+!outputs/.gitkeep
+*.mp4
+*.gif
+*.webm
+.DS_Store

@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+.ipynb_checkpoints/
+outputs/*
+!outputs/.gitkeep
+*.wav
+*.mp3
+.DS_Store

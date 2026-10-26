@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StyleGAN Face Studio</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 780px; margin: 3rem auto; padding: 0 1rem; }
+    img { max-width: 100%; border-radius: 12px; }
+    .note { background: #f3f4f6; padding: 1rem; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>StyleGAN Face Studio</h1>
+  {% if model_ready %}
+    <p>Generated face from the trained educational checkpoint:</p>
+    <img src="{{ url_for('static', filename='generated/' + image_name) }}" alt="Generated face">
+    <p><a href="/">Generate another</a></p>
+  {% else %}
+    <p class="note">No checkpoint found. Train the model first using the README instructions.</p>
+  {% endif %}
+</body>
+</html>
